@@ -1,9 +1,5 @@
 package json
 
-import (
-	"io"
-)
-
 const (
 	ObjectStart = '{' // {
 	ObjectEnd   = '}' // }
@@ -17,20 +13,17 @@ const (
 	Null        = 'n' // n
 )
 
-// NewScanner returns a new Scanner for the io.Reader r.
-// A Scanner reads from the supplied io.Reader and produces via Next a stream
-// of tokens, expressed as []byte slices.
-func NewScanner(r io.Reader) *Scanner {
+// NewScanner returns a new Scanner for given []byte
+// A Scanner produces a stream of tokens
+func NewScanner(data []byte) *Scanner {
 	return &Scanner{
-		br: byteReader{
-			r: r,
-		},
+		data: data,
 	}
 }
 
 // Scanner implements a JSON scanner as defined in RFC 7159.
 type Scanner struct {
-	br     byteReader
+	data   []byte
 	offset int
 }
 
@@ -41,7 +34,21 @@ var whitespace = [256]bool{
 	'\t': true,
 }
 
-// Next returns a []byte referencing the the next lexical token in the stream.
+var openArray = [256]bool{
+	'[': true,
+}
+var closeArray = [256]bool{
+	']': true,
+}
+
+var openObject = [256]bool{
+	'{': true,
+}
+var closeObject = [256]bool{
+	'}': true,
+}
+
+// Next returns a []byte referencing the next lexical token in the stream.
 // The []byte is valid until Next is called again.
 // If the stream is at its end, or an error has occurred, Next returns a zero
 // length []byte slice.
@@ -60,8 +67,11 @@ var whitespace = [256]bool{
 //	" A string, possibly containing backslash escaped entites.
 //	-, 0-9 A number
 func (s *Scanner) Next() []byte {
-	s.br.release(s.offset)
-	w := s.br.window()
+	if s.offset > len(s.data)-1 {
+		return nil
+	}
+	w := s.data[s.offset:]
+	initialOffset := s.offset
 	for {
 		for pos, c := range w {
 			// strip any leading whitespace.
@@ -72,88 +82,151 @@ func (s *Scanner) Next() []byte {
 			// simple case
 			switch c {
 			case ObjectStart, ObjectEnd, Colon, Comma, ArrayStart, ArrayEnd:
-				s.offset = pos + 1
-				return w[pos:s.offset]
+				s.offset += pos + 1
+				return w[pos : pos+1]
 			}
+			s.offset = initialOffset + pos
 
-			s.br.release(pos)
 			switch c {
 			case True:
-				s.offset = s.validateToken("true")
+				s.offset += s.validateToken("true")
 			case False:
-				s.offset = s.validateToken("false")
+				s.offset += s.validateToken("false")
 			case Null:
-				s.offset = s.validateToken("null")
+				s.offset += s.validateToken("null")
 			case String:
-				if s.parseString() < 2 {
+				length := s.parseString()
+				if length < 2 {
 					return nil
 				}
+				s.offset += length
+
 			default:
 				// ensure the number is correct.
-				s.offset = s.parseNumber(c)
+				s.offset += s.parseNumber(c)
 			}
-			return s.br.window()[:s.offset]
+			return s.data[initialOffset+pos : s.offset]
 		}
 
-		// it's all whitespace, ignore it
-		s.br.release(len(w))
-
-		// refill buffer
-		if s.br.extend() == 0 {
+		s.offset += len(w)
+		w = s.data[s.offset:]
+		if len(w) == 0 {
 			// eof
 			return nil
 		}
-		w = s.br.window()
 	}
 }
 
-func (s *Scanner) validateToken(expected string) int {
-	for {
-		w := s.br.window()
-		n := len(expected)
-		if len(w) >= n {
-			if string(w[:n]) != expected {
-				// doesn't match
-				return 0
-			}
-			return n
-		}
-		// not enough data is left, we need to extend
-		if s.br.extend() == 0 {
-			// eof
-			return 0
-		}
-	}
-}
-
-// parseString returns the length of the string token
-// located at the start of the window or 0 if there is no closing
-// " before the end of the byteReader.
-func (s *Scanner) parseString() int {
+func (s *Scanner) skipArray() {
+	w := s.data[s.offset:]
+	count := 1
+	inString := false
 	escaped := false
-	w := s.br.window()[1:]
-	offset := 0
-	for {
-		for _, c := range w {
-			offset++
+
+	for i, c := range w {
+		if c == '"' && !inString {
+			inString = true
+			continue
+		}
+
+		if inString {
 			switch {
 			case escaped:
 				escaped = false
 			case c == '"':
-				// finished
-				s.offset = offset + 1
-				return s.offset
+				inString = false
 			case c == '\\':
 				escaped = true
 			}
+			continue
 		}
-		// need more data from the pipe
-		if s.br.extend() == 0 {
-			// EOF.
+
+		if openArray[c] {
+			count++
+		}
+		if closeArray[c] {
+			count--
+			if count == 0 {
+				s.offset += i + 1
+				return
+			}
+		}
+	}
+
+	s.offset += len(w) + 1
+}
+
+func (s *Scanner) skipObject() {
+	w := s.data[s.offset:]
+	count := 1
+	inString := false
+	escaped := false
+
+	for i, c := range w {
+		if c == '"' && !inString {
+			inString = true
+			continue
+		}
+
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '"':
+				inString = false
+			case c == '\\':
+				escaped = true
+			}
+			continue
+		}
+
+		if openObject[c] {
+			count++
+		}
+		if closeObject[c] {
+			count--
+			if count == 0 {
+				s.offset += i + 1
+				return
+			}
+		}
+	}
+	s.offset += len(w) + 1
+}
+
+func (s *Scanner) validateToken(expected string) int {
+	w := s.data[s.offset:]
+	n := len(expected)
+	if len(w) >= n {
+		if string(w[:n]) != expected {
+			// doesn't match
 			return 0
 		}
-		w = s.br.window()[offset+1:]
+		return n
 	}
+	return 0
+}
+
+// parseString returns the length of the string token
+// located at the start of the window or 0 if there is no closing " before the end of the data
+func (s *Scanner) parseString() int {
+	escaped := false
+	w := s.data[s.offset+1:]
+	offset := 0
+	for _, c := range w {
+		offset++
+		switch {
+		case escaped:
+			escaped = false
+		case c == '"':
+			// finished
+			return offset + 1
+		case c == '\\':
+			escaped = true
+		}
+	}
+	// no closing "
+	return 0
 }
 
 func (s *Scanner) parseNumber(c byte) int {
@@ -169,7 +242,8 @@ func (s *Scanner) parseNumber(c byte) int {
 	)
 
 	offset := 0
-	w := s.br.window()
+	w := s.data[s.offset:]
+	// w := s.data[s.offset:]
 	// int vs uint8 costs 10% on canada.json
 	var state uint8 = begin
 
@@ -243,8 +317,8 @@ func (s *Scanner) parseNumber(c byte) int {
 			offset++
 		}
 
-		// need more data from the pipe
-		if s.br.extend() == 0 {
+		w = s.data[offset:]
+		if len(w) == 0 {
 			// end of the item. However, not necessarily an error. Make
 			// sure we are in a state that allows ending the number.
 			switch state {
@@ -255,10 +329,6 @@ func (s *Scanner) parseNumber(c byte) int {
 				return 0
 			}
 		}
-		w = s.br.window()
 	}
+	return offset
 }
-
-// Error returns the first error encountered.
-// When underlying reader is exhausted, Error returns io.EOF.
-func (s *Scanner) Error() error { return s.br.err }

@@ -18,22 +18,21 @@ type Decoder struct {
 }
 
 // NewDecoder returns a new Decoder for the supplied Reader r.
-func NewDecoder(r io.Reader) *Decoder {
-	return NewDecoderBuffer(r, make([]byte, 8192))
-}
-
-// NewDecoderBuffer returns a new Decoder for the supplier Reader r, using
-// the []byte buf provided for working storage.
-func NewDecoderBuffer(r io.Reader, buf []byte) *Decoder {
+func NewDecoder(buf []byte) *Decoder {
 	return &Decoder{
 		scanner: Scanner{
-			br: byteReader{
-				data: buf[:0],
-				r:    r,
-			},
+			data: buf,
 		},
 		state: (*Decoder).stateValue,
 	}
+}
+
+// Reset resets the Decoder to read from a new input stream.
+func (d *Decoder) Reset(buf []byte) {
+	d.scanner.offset = 0
+	d.scanner.data = buf
+	d.stack = d.stack[:0]
+	d.state = (*Decoder).stateValue
 }
 
 type stack []bool
@@ -513,6 +512,62 @@ func (d *Decoder) decodeSliceAny() ([]interface{}, error) {
 	}
 }
 
+// Skip the next JSON value(string/number/array/object)
+// Implementation is quite naive, it just skips the next value without proper validation(it doesn't relies on the decoder state).
+func (d *Decoder) Skip() error {
+	tok, err := d.NextToken()
+	if err != nil {
+		return err
+	}
+	d.state = (*Decoder).stateObjectComma
+	switch tok[0] {
+	case ObjectStart:
+		_ = d.pop()
+		d.scanner.skipObject()
+		return nil
+	case ArrayStart:
+		_ = d.pop()
+		d.scanner.skipArray()
+		return nil
+	}
+	return nil
+}
+
+// NextAsBytes returns the next JSON element as a []byte.
+func (d *Decoder) NextAsBytes() ([]byte, error) {
+	tok, err := d.NextToken()
+	if err != nil {
+		return nil, err
+	}
+	offset := d.getOffset() - 1
+	d.state = (*Decoder).stateObjectComma
+	switch tok[0] {
+	case ObjectStart:
+		_ = d.pop()
+		d.scanner.skipObject()
+	case ArrayStart:
+		_ = d.pop()
+		d.scanner.skipArray()
+	default:
+		offset := d.getOffset()
+		return d.scanner.data[offset-len(tok) : offset], nil
+	}
+	return d.scanner.data[offset:d.getOffset()], nil
+}
+
 func bytesToString(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+func (d *Decoder) getOffset() int {
+	return d.scanner.offset
+}
+
+func (d *Decoder) GetState() (int, func(*Decoder) ([]byte, error)) {
+	return d.scanner.offset, d.state
+}
+
+func (d *Decoder) SetState(offset int, state func(*Decoder) ([]byte, error)) {
+	d.scanner.offset = offset
+	d.state = state
 }

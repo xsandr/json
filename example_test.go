@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 
 	"github.com/pkg/json"
 )
 
 func ExampleScanner_Next() {
 	input := `{"a": 1,"b": 123.456, "c": [null]}`
-	sc := json.NewScanner(strings.NewReader(input))
+	sc := json.NewScanner([]byte(input))
 	for {
 		tok := sc.Next()
 		if len(tok) < 1 {
@@ -19,9 +18,10 @@ func ExampleScanner_Next() {
 		}
 		fmt.Printf("%s\n", tok)
 	}
-	if err := sc.Error(); err != nil && err != io.EOF {
-		log.Fatal(err)
-	}
+	// Fixme: think about having Error method
+	//if err := sc.Error(); err != nil && err != io.EOF {
+	//	log.Fatal(err)
+	//}
 
 	// Output:
 	// {
@@ -43,7 +43,7 @@ func ExampleScanner_Next() {
 
 func ExampleDecoder_Token() {
 	input := `{"a": 1,"b": 123.456, "c": [null]}`
-	dec := json.NewDecoder(strings.NewReader(input))
+	dec := json.NewDecoder([]byte(input))
 	for {
 		tok, err := dec.Token()
 		if err == io.EOF {
@@ -70,7 +70,7 @@ func ExampleDecoder_Token() {
 
 func ExampleDecoder_NextToken() {
 	input := `{"a": 1,"b": 123.456, "c": [null]}`
-	dec := json.NewDecoder(strings.NewReader(input))
+	dec := json.NewDecoder([]byte(input))
 	for {
 		tok, err := dec.NextToken()
 		if err == io.EOF {
@@ -96,7 +96,7 @@ func ExampleDecoder_NextToken() {
 }
 func ExampleDecoder_Decode() {
 	input := `{"a": 1,"b": 123.456, "c": [null]}`
-	dec := json.NewDecoder(strings.NewReader(input))
+	dec := json.NewDecoder([]byte(input))
 	var i interface{}
 	err := dec.Decode(&i)
 	if err != nil {

@@ -1,9 +1,9 @@
 package json
 
 import (
+	"bytes"
 	"io"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -42,7 +42,7 @@ func TestDecoderNextToken(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.json, func(t *testing.T) {
-			dec := NewDecoder(&SmallReader{r: strings.NewReader(tc.json)})
+			dec := NewDecoder([]byte(tc.json))
 			for n, want := range tc.tokens {
 				got, err := dec.NextToken()
 				if string(got) != want {
@@ -96,7 +96,7 @@ func TestDecoderInvalidJSON(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.json, func(t *testing.T) {
-			dec := NewDecoder(&SmallReader{r: strings.NewReader(tc.json)})
+			dec := NewDecoder([]byte(tc.json))
 			var err error
 			for {
 				_, err = dec.Token()
@@ -122,7 +122,7 @@ func TestDecoderDecode(t *testing.T) {
 	}
 
 	decode := func(input string, v interface{}) {
-		dec := NewDecoder(strings.NewReader(input))
+		dec := NewDecoder([]byte(input))
 		err := dec.Decode(v)
 		if err != nil {
 			t.Helper()
@@ -218,4 +218,118 @@ func TestDecoderDecode(t *testing.T) {
 			"three",
 		},
 	})
+}
+
+func TestDecoder_NextAsBytes(t *testing.T) {
+	tests := []struct {
+		json   string
+		tokens []string
+		next   []byte
+	}{
+		{json: `{"a":"test"}`, tokens: []string{"{", `"a"`}, next: []byte(`"test"`)},
+		{json: `{"a":  "test"}`, tokens: []string{"{", `"a"`}, next: []byte(`"test"`)},
+		{json: `{"a":  [1, 2, 3]}`, tokens: []string{"{", `"a"`}, next: []byte(`[1, 2, 3]`)},
+		{json: `{"obj": {"some": "key"}}`, tokens: []string{"{", `"obj"`}, next: []byte(`{"some": "key"}`)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.json, func(t *testing.T) {
+			dec := NewDecoder([]byte(tc.json))
+			for n, want := range tc.tokens {
+				got, err := dec.NextToken()
+				if string(got) != want {
+					t.Fatalf("%v: expected: %q, got: %q, %v", n+1, want, string(got), err)
+				}
+			}
+			got, err := dec.NextAsBytes()
+			if !bytes.Equal(got, tc.next) {
+				t.Fatalf("expected: %q, got: %q, %v", tc.next, got, err)
+			}
+		})
+	}
+}
+
+func TestDecoder_Skip(t *testing.T) {
+	tests := []struct {
+		json      string
+		tokens    []string
+		nextToken string
+	}{
+		{
+			json:      `{"a": "some long string", "b": true}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `"b"`,
+		},
+		{
+			json:      `{"a": {"key": "value"}, "b": true}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `"b"`,
+		},
+		{
+			json:      `{"a": [1, 2, 3]}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `}`,
+		},
+		{
+			json:      `{"a": [1, "][", 2], "b": true}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `"b"`,
+		},
+		{
+			json:      `{"a": [1, "strings starts here\" and continue after escape sequence][", 2]}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `}`,
+		},
+		{
+			json:      `{"a": [1, "strings starts here\" and continue after escape sequence][", 2]}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `}`,
+		},
+		{
+			json:      `{"a": [1, "strings starts here\" and continue after escape sequence][", 2]}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `}`,
+		},
+		{
+			json:      `{"a": {"b": 1}, "c": 3.1}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `"c"`,
+		},
+		{
+			json:      `{"a": {"b": [ "one", {"g": 1}, [true, false] ]}, "c": 3.1}`,
+			tokens:    []string{`{`, `"a"`},
+			nextToken: `"c"`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.json, func(t *testing.T) {
+			dec := NewDecoder([]byte(tc.json))
+			for n, want := range tc.tokens {
+				got, err := dec.NextToken()
+				if string(got) != want {
+					t.Fatalf("%v: expected: %q, got: %q, %v", n+1, want, string(got), err)
+				}
+				t.Logf("token: %q, stack: %v", got, dec.stack)
+			}
+			if err := dec.Skip(); err != nil {
+				t.Fatalf("skip: %v", err)
+			}
+			got, err := dec.NextToken()
+			if string(got) != tc.nextToken {
+				t.Fatalf("expected: %q, got: %q, %v", tc.nextToken, string(got), err)
+			}
+		})
+	}
+}
+
+func BenchmarkDecoder_Skip(b *testing.B) {
+	input := []byte(`{"a": 1,"b": 123.456, "c": [null]}`)
+	dec := NewDecoder(input)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := dec.Skip(); err != nil {
+			b.Fatalf("skip: %v", err)
+		}
+		dec.Reset(input)
+	}
 }

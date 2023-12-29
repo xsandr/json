@@ -32,20 +32,20 @@ var inputs = []struct {
 }
 
 func BenchmarkScanner(b *testing.B) {
-	var buf [8 << 10]byte
 	for _, tc := range inputs {
 		r := fixture(b, tc.path)
+		data, err := io.ReadAll(r)
+		if err != nil {
+			b.Fatalf("failed to read fixture: %v", err)
+		}
+		r.Seek(0, 0)
 		b.Run(tc.path, func(b *testing.B) {
 			b.ReportAllocs()
-			b.SetBytes(r.Size())
+			b.SetBytes(int64(len(data)))
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				r.Seek(0, 0)
 				sc := &Scanner{
-					br: byteReader{
-						data: buf[:0],
-						r:    r,
-					},
+					data: data,
 				}
 				n := 0
 				for len(sc.Next()) > 0 {
@@ -65,21 +65,19 @@ func BenchmarkBufferSize(b *testing.B) {
 	sizes := []int{16, 64, 256, 512, 1 << 10, 2 << 10, 4 << 10, 8 << 10, 16 << 10, 64 << 10, 1 << 20}
 	for _, tc := range inputs {
 		r := fixture(b, tc.path)
+		data, err := io.ReadAll(r)
+		if err != nil {
+			b.Fatalf("failed to read fixture: %v", err)
+		}
+		r.Seek(0, 0)
 		b.Run(tc.path, func(b *testing.B) {
 			for _, sz := range sizes {
-				buf := make([]byte, sz)
 				b.Run(strconv.Itoa(sz), func(b *testing.B) {
 					b.ReportAllocs()
-					b.SetBytes(r.Size())
+					b.SetBytes(int64(len(data)))
 					b.ResetTimer()
 					for i := 0; i < b.N; i++ {
-						r.Seek(0, 0)
-						sc := &Scanner{
-							br: byteReader{
-								data: buf[:0],
-								r:    r,
-							},
-						}
+						sc := &Scanner{data: data}
 						for len(sc.Next()) > 0 {
 
 						}
@@ -91,16 +89,19 @@ func BenchmarkBufferSize(b *testing.B) {
 }
 
 func BenchmarkDecoderDecodeInterfaceAny(b *testing.B) {
-	var buf [8 << 10]byte
 	for _, tc := range inputs {
 		r := fixture(b, tc.path)
+		data, err := io.ReadAll(r)
+		if err != nil {
+			b.Fatalf("failed to read fixture: %v", err)
+		}
+		r.Seek(0, 0)
 		b.Run("pkgjson/"+tc.path, func(b *testing.B) {
 			b.ReportAllocs()
-			b.SetBytes(r.Size())
+			b.SetBytes(int64(len(data)))
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				r.Seek(0, 0)
-				dec := NewDecoderBuffer(r, buf[:])
+				dec := NewDecoder(data)
 				var i interface{}
 				err := dec.Decode(&i)
 				check(b, err)
@@ -122,16 +123,19 @@ func BenchmarkDecoderDecodeInterfaceAny(b *testing.B) {
 }
 
 func BenchmarkDecoderDecodeMapInt(b *testing.B) {
-	var buf [8 << 10]byte
 	in := `{"a": 97, "b": 98, "c": 99, "d": 100, "e": 101, "f": 102, "g": 103 }`
 	r := strings.NewReader(in)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		b.Fatalf("failed to read fixture: %v", err)
+	}
+	r.Seek(0, 0)
 	b.Run("pkgjson", func(b *testing.B) {
 		b.ReportAllocs()
 		b.SetBytes(r.Size())
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			r.Seek(0, 0)
-			dec := NewDecoderBuffer(r, buf[:])
+			dec := NewDecoder(data)
 			m := make(map[string]int)
 			err := dec.Decode(&m)
 			check(b, err)
@@ -152,16 +156,20 @@ func BenchmarkDecoderDecodeMapInt(b *testing.B) {
 }
 
 func BenchmarkDecoderToken(b *testing.B) {
-	var buf [8 << 10]byte
 	for _, tc := range inputs {
 		r := fixture(b, tc.path)
+		data, err := io.ReadAll(r)
+		if err != nil {
+			b.Fatalf("failed to read fixture: %v", err)
+		}
+		r.Seek(0, 0)
 		b.Run("pkgjson/"+tc.path, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(r.Size())
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				r.Seek(0, 0)
-				dec := NewDecoderBuffer(r, buf[:])
+				dec := NewDecoder(data)
 				n := 0
 				for {
 					_, err := dec.Token()
@@ -201,16 +209,19 @@ func BenchmarkDecoderToken(b *testing.B) {
 }
 
 func BenchmarkDecoderNextToken(b *testing.B) {
-	var buf [8 << 10]byte
 	for _, tc := range inputs {
 		r := fixture(b, tc.path)
+		data, err := io.ReadAll(r)
+		if err != nil {
+			b.Fatalf("failed to read fixture: %v", err)
+		}
+		r.Seek(0, 0)
 		b.Run("pkgjson/"+tc.path, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(r.Size())
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				r.Seek(0, 0)
-				dec := NewDecoderBuffer(r, buf[:])
+				dec := NewDecoder(data)
 				n := 0
 				for {
 					_, err := dec.NextToken()
