@@ -5,7 +5,7 @@ import (
 	"io"
 	"log"
 
-	"github.com/pkg/json"
+	"github.com/xsandr/json"
 )
 
 func ExampleScanner_Next() {

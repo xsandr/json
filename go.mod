@@ -1,3 +1,3 @@
-module github.com/pkg/json
+module github.com/xsandr/json
 
 go 1.21

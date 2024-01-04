@@ -64,7 +64,7 @@ linters:
 
 linters-settings:
   gofumpt:
-    module-path: github.com/pkg/json
+    module-path: github.com/xsandr/json
   revive:
     rules:
     - name: var-naming
